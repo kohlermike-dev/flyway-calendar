@@ -1,0 +1,896 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flyway Calendar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bitter:wght@500;700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: field-notebook tool. Left rail = inputs (species, place); right = the year as 52 weekly bars per species. */
+:root {
+  --bg: #f2f5f4;
+  --panel: #ffffff;
+  --fg: #182326;
+  --muted: #5b6a6e;
+  --line: #d7dfdf;
+  --accent: #1f5f73;
+  --accent-ink: #ffffff;
+  --s1: #1f6f8b;
+  --s2: #c4622d;
+  --s3: #7b4b94;
+  --s4: #5f7d2a;
+  --good: #2e7d4f;
+  --warn: #a86b00;
+  --quiet: #7a8689;
+  --display: "Bitter", Georgia, "Times New Roman", serif;
+  --body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1719; --panel: #172226; --fg: #e3ecec; --muted: #9aabae; --line: #2a393d;
+    --accent: #6cb6cc; --accent-ink: #0b1417;
+    --s1: #5fb3d1; --s2: #e9895a; --s3: #b88bd1; --s4: #a3c25f;
+    --good: #6cc48f; --warn: #e3b04b; --quiet: #8b989b; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1719; --panel: #172226; --fg: #e3ecec; --muted: #9aabae; --line: #2a393d;
+  --accent: #6cb6cc; --accent-ink: #0b1417;
+  --s1: #5fb3d1; --s2: #e9895a; --s3: #b88bd1; --s4: #a3c25f;
+  --good: #6cc48f; --warn: #e3b04b; --quiet: #8b989b; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); padding: 20px 16px 40px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.wrap { max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; }
+header h1 { font-size: 1.9rem; font-weight: 700; letter-spacing: -0.01em; }
+header p { margin: 0; color: var(--muted); max-width: 62ch; }
+
+.app { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 880px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.rail { display: flex; flex-direction: column; gap: 16px; }
+
+.field { position: relative; }
+.field input[type="search"], .field input[type="text"] {
+  width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+}
+.suggest { position: absolute; left: 0; right: 0; top: calc(100% + 4px); background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.14); z-index: 2000; max-height: 320px; overflow-y: auto; }
+.suggest button { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; padding: 8px 10px; border: 0; background: none; cursor: pointer; }
+.suggest button:hover, .suggest button.active { background: var(--bg); }
+.suggest img { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; flex: none; background: var(--line); }
+.suggest .sci, .chip .sci { font-style: italic; color: var(--muted); font-size: 0.85em; }
+.suggest .empty { padding: 10px 12px; color: var(--muted); }
+
+.chips { display: flex; flex-direction: column; gap: 8px; }
+.chip { display: grid; grid-template-columns: 6px 36px minmax(0,1fr) auto; gap: 10px; align-items: center; }
+.chip .swatch { width: 6px; height: 36px; border-radius: 3px; }
+.chip img { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: var(--line); }
+.chip .names { min-width: 0; line-height: 1.25; }
+.chip .names div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon-btn { border: 1px solid var(--line); background: none; border-radius: 6px; width: 30px; height: 30px; cursor: pointer; color: var(--muted); }
+.icon-btn:hover { color: var(--fg); border-color: var(--muted); }
+.hint { font-size: 0.85rem; color: var(--muted); margin: 0; }
+
+#map { height: 300px; border-radius: 8px; border: 1px solid var(--line); z-index: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row > .grow { flex: 1 1 160px; min-width: 0; }
+.btn { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 7px 12px; cursor: pointer; font-size: 0.9rem; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.pin { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); border: 3px solid var(--panel); box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+
+.results { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.where { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; justify-content: space-between; }
+.where h2 { font-size: 1.35rem; font-weight: 500; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: none; padding: 5px 10px; cursor: pointer; font-size: 0.82rem; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+
+.chart-box { overflow-x: auto; }
+svg text { fill: var(--muted); font-family: var(--mono); font-size: 11px; }
+svg .grid { stroke: var(--line); stroke-width: 1; }
+svg .today { stroke: var(--fg); stroke-width: 1; stroke-dasharray: 3 3; opacity: .6; }
+svg .today-label { fill: var(--fg); }
+
+.cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; }
+.card-head h3 { font-size: 1.15rem; display: flex; align-items: center; gap: 10px; }
+.card-head h3 .dot { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.pill { font-size: 0.78rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.pill.good { color: var(--good); } .pill.warn { color: var(--warn); } .pill.quiet { color: var(--quiet); }
+.verdict { font-family: var(--display); font-size: 1.05rem; font-weight: 500; }
+.detail { margin: 0; max-width: 70ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.82rem; color: var(--muted); }
+.meta a { color: var(--accent); }
+.note { font-size: 0.82rem; color: var(--warn); margin: 0; }
+.err { color: var(--warn); }
+.loading { color: var(--muted); font-style: italic; }
+.empty-state { text-align: center; padding: 40px 16px; color: var(--muted); }
+footer { color: var(--muted); font-size: 0.8rem; max-width: 90ch; }
+footer a { color: var(--accent); }
+.leaflet-container { background: var(--bg); font: inherit; }
+
+.mw-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 20px; align-items: start; }
+.mw-group { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mw-group h3 { font-size: 1rem; display: flex; align-items: baseline; gap: 8px; }
+.mw-group h3 .mono { color: var(--muted); font-weight: 400; }
+.mw-group > p { margin: 0 0 6px; font-size: 0.82rem; color: var(--muted); }
+.mw-item { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: center; padding: 5px 6px; margin: 0 -6px;
+  border: 0; border-radius: 6px; background: none; text-align: left; cursor: pointer; width: calc(100% + 12px); }
+.mw-item:hover { background: var(--bg); }
+.mw-item img { width: 32px; height: 32px; border-radius: 5px; object-fit: cover; background: var(--line); }
+.mw-item .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.25; }
+.mw-item .st { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); line-height: 1.3; }
+.mw-item.added .nm::after { content: " ✓"; color: var(--good); }
+.mw-more { align-self: flex-start; border: 0; background: none; color: var(--accent); cursor: pointer; padding: 4px 0; font-size: 0.85rem; }
+.mw-group[data-kind="passing"] h3 .tag { background: var(--s1); }
+.mw-group[data-kind="arriving"] h3 .tag { background: var(--good); }
+.mw-group[data-kind="leaving"] h3 .tag { background: var(--s2); }
+.mw-group[data-kind="here"] h3 .tag { background: var(--s3); }
+.mw-group h3 .tag { width: 10px; height: 10px; border-radius: 2px; flex: none; align-self: center; }
+/* Hover zoom: a floating copy grows out of the thumbnail, so lists that scroll or clip don't cut it off. */
+.chip img, .mw-item img, .suggest img { cursor: zoom-in; }
+#zoom { position: fixed; z-index: 3000; width: 240px; height: 240px; pointer-events: none; border-radius: 10px; overflow: hidden;
+  background: var(--line); border: 3px solid var(--panel); box-shadow: 0 12px 32px rgba(0,0,0,.3);
+  transform-origin: var(--ox, 50%) var(--oy, 50%); transform: scale(var(--s0, .15)); opacity: 0;
+  transition: transform .18s ease-out, opacity .12s ease-out; }
+#zoom.on { transform: scale(1); opacity: 1; }
+#zoom img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#zoom figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 8px 6px; font-size: 0.8rem; color: #fff;
+  background: linear-gradient(transparent, rgba(0,0,0,.65)); }
+.sound-toggle { display: inline-flex; align-items: center; gap: 8px; }
+.sound-toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.sound-toggle[aria-pressed="true"] .mute, .sound-toggle[aria-pressed="false"] .waves { display: none; }
+#zoom .zn { display: block; font-weight: 600; }
+#zoom .zs { display: block; font-size: 0.7rem; opacity: .9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#zoom .zs:empty { display: none; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Flyway Calendar</h1>
+    <p>Pick birds and a place. See which weeks of the year they show up there, built from iNaturalist sightings.</p>
+    <button class="btn sound-toggle" type="button" id="sound-toggle" aria-pressed="true">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path class="waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path class="mute" d="M16 9l6 6M22 9l-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Songs on hover</span>
+    </button>
+  </header>
+
+  <div class="app">
+    <aside class="rail">
+      <section class="panel" aria-labelledby="sp-label">
+        <div class="label" id="sp-label">Species (up to 4)</div>
+        <div class="field">
+          <input type="search" id="sp-search" placeholder="Search birds, e.g. Baltimore Oriole" autocomplete="off" aria-label="Search bird species">
+          <div class="suggest" id="sp-suggest" hidden></div>
+        </div>
+        <div class="chips" id="chips"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="loc-label">
+        <div class="label" id="loc-label">Area</div>
+        <form class="row" id="place-form">
+          <input class="grow" type="text" id="place-q" placeholder="Town, park or region" aria-label="Search for a place" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)">
+          <button class="btn" type="submit">Go</button>
+        </form>
+        <div id="map" role="application" aria-label="Map. Click to move the search area."></div>
+        <p class="hint">Click the map or drag the pin to move the circle.</p>
+        <div>
+          <div class="row" style="justify-content:space-between">
+            <label for="radius" class="label">Radius</label>
+            <span class="mono" id="radius-out">150 km</span>
+          </div>
+          <input type="range" id="radius" min="25" max="300" step="25" value="150">
+        </div>
+        <div class="row">
+          <label for="years" class="label">Years of data</label>
+          <select id="years">
+            <option value="5">Last 5 years</option>
+            <option value="10" selected>Last 10 years</option>
+            <option value="0">All years</option>
+          </select>
+        </div>
+        <div class="row">
+          <button class="btn" type="button" id="locate">Use my location</button>
+          <button class="btn" type="button" id="reset">Reset to East Coast</button>
+        </div>
+        <p class="hint" id="loc-msg" hidden></p>
+      </section>
+    </aside>
+
+    <main class="results">
+      <section class="panel" aria-labelledby="mw-title">
+        <div class="where">
+          <h2 id="mw-title">Migrating through now</h2>
+          <div class="row">
+            <button class="icon-btn" type="button" id="mw-prev" aria-label="Previous week">‹</button>
+            <span class="mono" id="mw-range"></span>
+            <button class="icon-btn" type="button" id="mw-next" aria-label="Next week">›</button>
+            <button class="btn" type="button" id="mw-today" hidden>This week</button>
+          </div>
+        </div>
+        <p class="hint">Birds reported in this circle over these 3 weeks, leaving out year-round residents. Compared with how often each is reported here in summer (mid-June to July) and winter (December to mid-February). Click a bird to add it to the calendar below.</p>
+        <div class="mw-groups" id="mw"></div>
+      </section>
+
+      <section class="panel">
+        <div class="where">
+          <h2 id="where">Within 150 km of 42.36°N, 71.06°W</h2>
+          <div class="seg" role="group" aria-label="Chart scale">
+            <button type="button" id="scale-rel" aria-pressed="true">Scaled to each peak</button>
+            <button type="button" id="scale-abs" aria-pressed="false">% of bird reports</button>
+          </div>
+        </div>
+        <div class="chart-box" id="overlay"></div>
+      </section>
+      <div class="cards" id="cards"></div>
+      <footer>
+        Each week's value is that species' share of all bird observations in the circle that week, smoothed over 3 weeks. Dividing by all birds corrects for spring, when far more people are out birding. Arrival and departure dates are when reports rise above, or fall below, 7% of the species' peak. Data: <a href="https://www.inaturalist.org" target="_blank" rel="noopener">iNaturalist</a> (verifiable observations). Map: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.
+      </footer>
+    </main>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(() => {
+  const API = 'https://api.inaturalist.org/v1';
+  const AVES = 3;
+  const MAX_SP = 4;
+  const T = 0.07; // presence threshold, fraction of peak (low, so a modest spring arrival before a big late-summer peak still counts)
+  const DEFAULT = {
+    lat: 42.36, lng: -71.06, radius: 150, years: 10,
+    species: [
+      { id: 145240, name: 'Blackpoll Warbler', sci: 'Setophaga striata', photo: 'https://static.inaturalist.org/photos/40556924/square.jpg', wiki: 'https://en.wikipedia.org/wiki/Blackpoll_warbler' },
+      { id: 6432, name: 'Ruby-throated Hummingbird', sci: 'Archilochus colubris', photo: 'https://inaturalist-open-data.s3.amazonaws.com/photos/221352761/square.jpg', wiki: 'https://en.wikipedia.org/wiki/Ruby-throated_hummingbird' },
+      { id: 10094, name: 'Dark-eyed Junco', sci: 'Junco hyemalis', photo: 'https://inaturalist-open-data.s3.amazonaws.com/photos/111714701/square.jpeg', wiki: 'https://en.wikipedia.org/wiki/Dark-eyed_junco' }
+    ]
+  };
+  const EAST_BOUNDS = [[38.9, -76], [45.5, -67]];
+  const SLOTS = ['--s1', '--s2', '--s3', '--s4'];
+
+  // ---------- storage ----------
+  const store = {
+    get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+  };
+  let state = Object.assign(structuredClone(DEFAULT), store.get('flyway.state') || {});
+  let scaleMode = store.get('flyway.scale') || 'rel';
+  const save = () => store.set('flyway.state', state);
+
+  // ---------- API with pacing + cache ----------
+  const CACHE_TTL = 7 * 24 * 3600 * 1000;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let lastReq = 0, chain = Promise.resolve();
+  function cached(url) {
+    const c = store.get('flyway.c:' + url);
+    return c && Date.now() - c.t < CACHE_TTL ? c.d : null;
+  }
+  const inflight = new Map();
+  function apiGet(url) {
+    const hit = cached(url);
+    if (hit) return Promise.resolve(hit);
+    if (inflight.has(url)) return inflight.get(url);
+    const p = chain.then(async () => {
+      const wait = lastReq + 1000 - Date.now();
+      if (wait > 0) await sleep(wait);
+      lastReq = Date.now();
+      let r = await fetch(url);
+      if (r.status === 429) { await sleep(3000); lastReq = Date.now(); r = await fetch(url); }
+      if (!r.ok) throw new Error('iNaturalist returned ' + r.status);
+      const d = await r.json();
+      store.set('flyway.c:' + url, { t: Date.now(), d });
+      return d;
+    });
+    chain = p.catch(() => {});
+    inflight.set(url, p);
+    p.finally(() => inflight.delete(url)).catch(() => {});
+    return p;
+  }
+
+  // ---------- dates ----------
+  const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const weekStart = i => fmt(new Date(2025, 0, 1 + i * 7));
+  const weekEnd = i => fmt(new Date(2025, 0, 1 + i * 7 + 6));
+  const weekMid = i => fmt(new Date(2025, 0, 1 + i * 7 + 3));
+  function currentWeek() {
+    const now = new Date();
+    const doy = Math.floor((now - new Date(now.getFullYear(), 0, 1)) / 864e5);
+    return Math.min(51, Math.floor(doy / 7));
+  }
+
+  // ---------- analysis ----------
+  function toWeeks(obj) {
+    const a = new Array(52).fill(0);
+    for (const [k, v] of Object.entries(obj || {})) a[Math.min(+k, 52) - 1] += v;
+    return a;
+  }
+  const mod = i => ((i % 52) + 52) % 52;
+  const mean = idx => idx.reduce((s, i) => s + rel[i], 0) / idx.length;
+  let rel; // set per analysis, used by mean()
+  const range = (a, b) => Array.from({ length: b - a + 1 }, (_, k) => a + k);
+  const WIN = { winter: [...range(0, 6), ...range(48, 51)], summer: range(23, 29), spring: range(12, 21), fall: range(32, 43) };
+
+  // Contiguous run of weeks at/above threshold around seed, tolerating 1-week gaps. Circular.
+  function run(r, seed) {
+    if (r[seed] < T) return null;
+    let a = seed, b = seed, n = 1;
+    while (n < 52 && (r[mod(a - 1)] >= T || r[mod(a - 2)] >= T)) { a--; n = b - a + 1; }
+    while (n < 52 && (r[mod(b + 1)] >= T || r[mod(b + 2)] >= T)) { b++; n = b - a + 1; }
+    return n >= 52 ? { all: true } : { a: mod(a), b: mod(b) };
+  }
+  const argmax = (r, idx) => idx.reduce((m, i) => (r[i] > r[m] ? i : m), idx[0]);
+
+  function analyze(spW, allW) {
+    const N = spW.reduce((s, v) => s + v, 0);
+    const raw = spW.map((v, i) => (allW[i] > 0 ? v / allW[i] : 0));
+    const sm = raw.map((_, i) => 0.25 * raw[mod(i - 1)] + 0.5 * raw[i] + 0.25 * raw[mod(i + 1)]);
+    const peak = Math.max(...sm);
+    rel = sm.map(v => (peak ? v / peak : 0));
+    const out = { N, sm, rel: rel.slice(), peakPct: peak * 100, peakWeek: rel.indexOf(1) };
+    if (N < 15) {
+      return Object.assign(out, { type: 'rare', verdict: 'Too few records here', detail: N ? `Only ${N} verifiable sighting${N === 1 ? '' : 's'} in this area. Try a bigger radius or more years.` : 'No verifiable sightings in this area. Try a bigger radius or a different place.' });
+    }
+    const W = mean(WIN.winter), S = mean(WIN.summer), Sp = Math.max(...WIN.spring.map(i => rel[i])), F = Math.max(...WIN.fall.map(i => rel[i]));
+    // Staying through a season (every week in it above threshold) matters more than how high those
+    // weeks are: a summer breeder's May arrival can dwarf its quieter nesting weeks.
+    const Wmin = Math.min(...WIN.winter.map(i => rel[i])), Smin = Math.min(...WIN.summer.map(i => rel[i]));
+    const p = weekMid(out.peakWeek);
+    if (Wmin >= T && Smin >= T) {
+      Object.assign(out, { type: 'resident', verdict: 'Year-round resident', detail: `Reported in every season. Reports are highest around ${p}.` });
+    } else if (Smin >= T && W < 0.1) {
+      const rn = run(rel, argmax(rel, WIN.summer));
+      Object.assign(out, rn && !rn.all
+        ? { type: 'summer', verdict: 'Summer resident', detail: `Arrives around ${weekStart(rn.a)} and is mostly gone by ${weekEnd(rn.b)}. Reports peak around ${p}.`, runs: [rn] }
+        : { type: 'summer', verdict: 'Mostly a summer bird', detail: `Reports peak around ${p}.` });
+    } else if (Wmin >= T && S < 0.1) {
+      const rn = run(rel, argmax(rel, WIN.winter));
+      Object.assign(out, rn && !rn.all
+        ? { type: 'winter', verdict: 'Winter visitor', detail: `Arrives around ${weekStart(rn.a)} and leaves by ${weekEnd(rn.b)}. Reports peak around ${p}.`, runs: [rn] }
+        : { type: 'winter', verdict: 'Mostly a winter bird', detail: `Reports peak around ${p}.` });
+    } else if (Sp >= 0.3 || F >= 0.3) {
+      const parts = [], runs = [];
+      const sPk = argmax(rel, range(9, 23)), fPk = argmax(rel, range(29, 47));
+      const sr = run(rel, sPk), fr = run(rel, fPk);
+      if (sr && !sr.all && rel[sPk] >= 0.3) runs.push(sr), parts.push(`Spring: ${weekStart(sr.a)} to ${weekEnd(sr.b)}, peak around ${weekMid(sPk)}.`);
+      else parts.push('Spring passage is barely recorded here.');
+      if (fr && !fr.all && rel[fPk] >= 0.3) runs.push(fr), parts.push(`Fall: ${weekStart(fr.a)} to ${weekEnd(fr.b)}, peak around ${weekMid(fPk)}.`);
+      else parts.push('Fall passage is barely recorded here.');
+      Object.assign(out, { type: 'passage', verdict: 'Passes through on migration', detail: parts.join(' '), runs });
+    } else {
+      Object.assign(out, { type: 'irregular', verdict: 'No clear season', detail: `Reports are scattered through the year, highest around ${p}.` });
+    }
+    return out;
+  }
+
+  // A week counts as "in season" only inside the arrival-departure spans the summary reports,
+  // so the badge never contradicts the text (e.g. a fall passage that is "barely recorded").
+  const inRun = (i, rn) => (rn.a <= rn.b ? i >= rn.a && i <= rn.b : i >= rn.a || i <= rn.b);
+  function nowStatus(res) {
+    const r = res.runs ? res.rel.map((v, i) => (res.runs.some(rn => inRun(i, rn)) ? v : 0)) : res.rel;
+    const w = currentWeek(), v = r[w];
+    const ahead = r[mod(w + 2)];
+    if (v >= 0.75) return { cls: 'good', text: 'Near peak now' };
+    if (v >= T && ahead > v * 1.15) return { cls: 'good', text: 'Numbers rising now' };
+    if (v >= T && ahead < v * 0.85) return { cls: 'warn', text: 'Present, numbers falling' };
+    if (v >= T) return { cls: 'good', text: 'Present now' };
+    for (let k = 1; k <= 8; k++) if (r[mod(w + k)] >= T) return { cls: 'warn', text: `Expected in about ${k} week${k > 1 ? 's' : ''}` };
+    return { cls: 'quiet', text: 'Not expected now' };
+  }
+
+  // ---------- charts ----------
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthWeek = m => (new Date(2025, m, 1) - new Date(2025, 0, 1)) / 864e5 / 7;
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function niceMax(v) {
+    if (v <= 0) return 1;
+    const e = Math.pow(10, Math.floor(Math.log10(v))), f = v / e;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e;
+  }
+
+  function overlaySVG(items) {
+    const W = 760, H = 250, L = 46, R = 12, Tp = 14, B = 30;
+    const x = w => L + (w / 52) * (W - L - R);
+    const ok = items.filter(it => it.res && it.res.type !== 'rare');
+    const abs = scaleMode === 'abs';
+    const ymax = abs ? niceMax(Math.max(0.0001, ...ok.map(it => it.res.peakPct))) : 1;
+    const y = v => H - B - (v / ymax) * (H - B - Tp);
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:520px;display:block" role="img" aria-label="Weekly reporting rate for each selected species">`;
+    for (let k = 0; k <= 4; k++) {
+      const v = (ymax * k) / 4, yy = y(v);
+      s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}"/>`;
+      const lab = abs ? (v >= 1 ? v.toFixed(v % 1 ? 1 : 0) : v.toFixed(v < 0.1 ? 2 : 1)) + '%' : Math.round(v * 100) + '%';
+      s += `<text x="${L - 6}" y="${yy + 4}" text-anchor="end">${lab}</text>`;
+    }
+    MONTHS.forEach((m, i) => {
+      const mx = x(monthWeek(i));
+      s += `<line class="grid" x1="${mx}" x2="${mx}" y1="${H - B}" y2="${H - B + 5}"/>`;
+      const next = i < 11 ? x(monthWeek(i + 1)) : x(52);
+      s += `<text x="${(mx + next) / 2}" y="${H - 10}" text-anchor="middle">${m}</text>`;
+    });
+    const tw = currentWeek() + 0.5, tx = x(tw);
+    s += `<line class="today" x1="${tx}" x2="${tx}" y1="${Tp}" y2="${H - B}"/><text class="today-label" x="${tx + 4}" y="${Tp + 8}">today</text>`;
+    ok.forEach(it => {
+      const vals = abs ? it.res.sm.map(v => v * 100) : it.res.rel;
+      const pts = vals.map((v, i) => `${x(i + 0.5).toFixed(1)},${y(v).toFixed(1)}`);
+      const col = `var(${it.slot})`;
+      if (ok.length === 1) s += `<path d="M${x(0.5)},${y(0)} L${pts.join(' L')} L${x(51.5)},${y(0)} Z" fill="${col}" fill-opacity=".15" stroke="none"/>`;
+      s += `<polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="2.2" stroke-linejoin="round"/>`;
+    });
+    if (!ok.length) s += `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">${items.some(i => !i.res && !i.err) ? 'Loading sightings…' : 'No species with enough data to chart'}</text>`;
+    return s + '</svg>';
+  }
+
+  function barsSVG(res, allW, spW, slot) {
+    const W = 760, H = 86, L = 4, R = 4, Tp = 6, B = 20;
+    const bw = (W - L - R) / 52;
+    const x = w => L + w * bw;
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:520px;display:block" role="img" aria-label="Weekly bars, January to December">`;
+    s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}"/>`;
+    res.rel.forEach((v, i) => {
+      const h = Math.max(v > 0 ? 1.5 : 0, v * (H - B - Tp));
+      const op = v >= T ? 1 : 0.35;
+      s += `<rect x="${(x(i) + 1).toFixed(1)}" y="${(H - B - h).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="1.5" fill="var(${slot})" fill-opacity="${op}"><title>Week of ${weekStart(i)}: ${(res.sm[i] * 100).toFixed(2)}% of bird reports (${spW[i]} of ${allW[i]} sightings)</title></rect>`;
+    });
+    MONTHS.forEach((m, i) => s += `<text x="${x(monthWeek(i)) + 2}" y="${H - 5}">${m}</text>`);
+    const tx = x(currentWeek() + 0.5);
+    s += `<line class="today" x1="${tx}" x2="${tx}" y1="${Tp - 4}" y2="${H - B}"/>`;
+    return s + '</svg>';
+  }
+
+  // ---------- rendering ----------
+  const $ = id => document.getElementById(id);
+  let renderSeq = 0;
+  const results = new Map(); // species id -> {res, spW, err}
+
+  function histURL(taxon) {
+    const p = new URLSearchParams({
+      taxon_id: taxon, lat: state.lat.toFixed(2), lng: state.lng.toFixed(2), radius: state.radius,
+      interval: 'week_of_year', date_field: 'observed', verifiable: 'true'
+    });
+    if (+state.years) p.set('d1', `${new Date().getFullYear() - state.years}-01-01`);
+    return `${API}/observations/histogram?${p}`;
+  }
+
+  function drawChips() {
+    const el = $('chips');
+    if (!state.species.length) { el.innerHTML = '<p class="hint">Add a species to see when it is around.</p>'; return; }
+    el.innerHTML = state.species.map((sp, i) => `
+      <div class="chip">
+        <span class="swatch" style="background:var(${SLOTS[i]})"></span>
+        <img src="${esc(sp.photo || '')}" alt="" loading="lazy" data-taxon="${sp.id}">
+        <div class="names"><div>${esc(sp.name)}</div><div class="sci">${esc(sp.sci)}</div></div>
+        <button class="icon-btn" type="button" data-rm="${sp.id}" aria-label="Remove ${esc(sp.name)}">✕</button>
+      </div>`).join('');
+  }
+
+  function drawResults(allW) {
+    const items = state.species.map((sp, i) => ({ sp, slot: SLOTS[i], ...(results.get(sp.id) || {}) }));
+    $('overlay').innerHTML = overlaySVG(items);
+    const cards = $('cards');
+    if (!state.species.length) {
+      cards.innerHTML = '<div class="card empty-state">Search for a bird on the left to see its calendar for this area.</div>';
+      return;
+    }
+    const inatPlace = `lat=${state.lat.toFixed(3)}&lng=${state.lng.toFixed(3)}&radius=${state.radius}`;
+    cards.innerHTML = items.map(it => {
+      const { sp, slot, res, err, spW } = it;
+      let body;
+      if (err) body = `<p class="detail err">Could not load sightings: ${esc(err)}. Wait a moment and change any setting to retry.</p>`;
+      else if (!res) body = `<p class="detail loading">Loading sightings…</p>`;
+      else {
+        const st = res.type === 'rare' ? null : nowStatus(res);
+        body = `
+          <div class="verdict">${esc(res.verdict)}</div>
+          <p class="detail">${esc(res.detail)}</p>
+          ${res.type !== 'rare' ? `<div class="chart-box">${barsSVG(res, allW, spW, slot)}</div>` : ''}
+          ${res.type !== 'rare' && res.N < 60 ? `<p class="note">Based on only ${res.N} sightings, so treat the dates as rough.</p>` : ''}
+          <div class="meta">
+            <span class="mono">${res.N.toLocaleString()} sightings</span>
+            ${res.type !== 'rare' ? `<span class="mono">peak ${res.peakPct.toFixed(2)}% of bird reports</span>` : ''}
+            <a href="https://www.inaturalist.org/observations?taxon_id=${sp.id}&${inatPlace}" target="_blank" rel="noopener">Sightings map</a>
+            <a href="https://www.inaturalist.org/taxa/${sp.id}" target="_blank" rel="noopener">iNaturalist</a>
+            ${sp.wiki ? `<a href="${esc(sp.wiki)}" target="_blank" rel="noopener">Wikipedia</a>` : ''}
+          </div>`;
+        if (st) it.pill = st;
+      }
+      return `<article class="card">
+        <div class="card-head">
+          <h3><span class="dot" style="background:var(${slot})"></span>${esc(sp.name)}</h3>
+          ${it.pill ? `<span class="pill ${it.pill.cls}">${it.pill.text}</span>` : ''}
+        </div>${body}</article>`;
+    }).join('');
+  }
+
+  let lastAllW = null;
+  async function render() {
+    const seq = ++renderSeq;
+    save();
+    $('where').textContent = `Within ${state.radius} km of ${Math.abs(state.lat).toFixed(2)}°${state.lat >= 0 ? 'N' : 'S'}, ${Math.abs(state.lng).toFixed(2)}°${state.lng >= 0 ? 'E' : 'W'}`;
+    results.clear();
+    drawChips();
+    drawResults(lastAllW);
+    if (mwData) drawMigrants();
+    if (!state.species.length) return;
+    let allW;
+    try {
+      allW = toWeeks((await apiGet(histURL(AVES))).results.week_of_year);
+    } catch (e) {
+      if (seq !== renderSeq) return;
+      state.species.forEach(sp => results.set(sp.id, { err: e.message }));
+      drawResults(null);
+      return;
+    }
+    if (seq !== renderSeq) return;
+    lastAllW = allW;
+    for (const sp of state.species.slice()) {
+      try {
+        const spW = toWeeks((await apiGet(histURL(sp.id))).results.week_of_year);
+        if (seq !== renderSeq) return;
+        results.set(sp.id, { res: analyze(spW, allW), spW });
+      } catch (e) {
+        if (seq !== renderSeq) return;
+        results.set(sp.id, { err: e.message });
+      }
+      drawResults(allW);
+    }
+  }
+  // ---------- migrating through ----------
+  // For the chosen 3-week window, compare each species' share of bird reports with its share in
+  // summer and in winter. Seen often in both = year-round resident (left out). Otherwise the
+  // baseline it is missing from says whether it is passing through, arriving or leaving.
+  let mwWeek = currentWeek(), mwSeq = 0, mwData = null;
+  const mwOpen = new Set();
+  const BASE = 0.25; // a season "has" the bird if its reporting rate there is >= 25% of now
+  const MW_MIN = 3;  // ignore one-off sightings
+  const MW_SHOW = 8;
+  const weekParam = idx => { const s = new Set(); idx.forEach(i => { s.add(i + 1); if (i === 51) s.add(53); }); return [...s].join(','); };
+  function countsURL(idx) {
+    const p = new URLSearchParams({
+      taxon_id: AVES, lat: state.lat.toFixed(2), lng: state.lng.toFixed(2), radius: state.radius,
+      verifiable: 'true', per_page: 500, week: weekParam(idx)
+    });
+    if (+state.years) p.set('d1', `${new Date().getFullYear() - state.years}-01-01`);
+    return `${API}/observations/species_counts?${p}`;
+  }
+  const phaseOf = w => (w >= 7 && w <= 22 ? 'spring' : w >= 23 && w <= 29 ? 'summer' : w >= 30 && w <= 47 ? 'fall' : 'winter');
+
+  function classifyMigrants(nowR, sumR, winR, allW, w) {
+    const nowIdx = [mod(w - 1), w, mod(w + 1)];
+    const tot = idx => idx.reduce((s, i) => s + allW[i], 0) || 1;
+    const dn = tot(nowIdx), ds = tot(WIN.summer), dw = tot(WIN.winter);
+    const sMap = new Map(sumR.map(r => [r.taxon.id, r.count])), wMap = new Map(winR.map(r => [r.taxon.id, r.count]));
+    const phase = phaseOf(w);
+    const groups = { passing: [], arriving: [], leaving: [], here: [] };
+    for (const r of nowR) {
+      const t = r.taxon;
+      if (t.rank !== 'species' || r.count < MW_MIN) continue;
+      const rn = r.count / dn, rs = (sMap.get(t.id) || 0) / ds, rw = (wMap.get(t.id) || 0) / dw;
+      const inS = rs >= BASE * rn, inW = rw >= BASE * rn;
+      if (inS && inW) continue; // year-round resident
+      const item = {
+        id: t.id, name: t.preferred_common_name || t.name, sci: t.name,
+        photo: t.default_photo?.square_url || '', wiki: t.wikipedia_url || '', count: r.count
+      };
+      if (!inS && !inW) {
+        const base = Math.max(rs, rw);
+        item.stat = base ? `${Math.round(rn / base)}× its summer/winter rate` : 'not seen here in summer or winter';
+        groups.passing.push(item);
+        continue;
+      }
+      const kind = inW ? 'winter' : 'summer';
+      item.stat = `${kind} visitor`;
+      const g = phase === 'fall' ? (kind === 'winter' ? 'arriving' : 'leaving')
+              : phase === 'spring' ? (kind === 'summer' ? 'arriving' : 'leaving')
+              : 'here';
+      groups[g].push(item);
+    }
+    for (const k in groups) groups[k].sort((a, b) => b.count - a.count);
+    return groups;
+  }
+
+  const MW_LABELS = {
+    passing: ['Passing through', 'Migrants seen now but seldom here in summer or winter.'],
+    arriving: ['Arriving for the season', 'Seasonal visitors whose time here is starting.'],
+    leaving: ['Leaving', 'Seasonal visitors on their way out.'],
+    here: ['Seasonal visitors', 'Here for this season only, not all year.']
+  };
+  function drawMigrants() {
+    const el = $('mw');
+    const w = mwWeek, isNow = w === currentWeek();
+    const span = `${weekStart(mod(w - 1))} – ${weekEnd(mod(w + 1))}`;
+    $('mw-title').textContent = isNow ? 'Migrating through now' : 'Migrating through';
+    $('mw-range').textContent = span;
+    $('mw-today').hidden = isNow;
+    if (!mwData) { el.innerHTML = '<p class="loading">Loading this area\'s bird list…</p>'; return; }
+    if (mwData.err) { el.innerHTML = `<p class="err">Could not load the bird list: ${esc(mwData.err)}. Change any setting to retry.</p>`; return; }
+    const have = new Set(state.species.map(s => s.id));
+    const kinds = ['passing', 'arriving', 'leaving', 'here'].filter(k => mwData.groups[k].length);
+    if (!kinds.length) { el.innerHTML = '<p class="hint">No migrants stand out in this area for these weeks. Try a bigger radius or another week.</p>'; return; }
+    el.innerHTML = kinds.map(k => {
+      const list = mwData.groups[k], open = mwOpen.has(k);
+      const shown = open ? list : list.slice(0, MW_SHOW);
+      return `<div class="mw-group" data-kind="${k}">
+        <h3><span class="tag"></span>${MW_LABELS[k][0]} <span class="mono">${list.length}</span></h3>
+        <p>${MW_LABELS[k][1]}</p>
+        ${shown.map(it => `<button type="button" class="mw-item${have.has(it.id) ? ' added' : ''}" data-mw="${k}:${it.id}" title="Add ${esc(it.name)} to the calendar">
+          <img src="${esc(it.photo)}" alt="" loading="lazy" data-taxon="${it.id}">
+          <span style="min-width:0"><div class="nm">${esc(it.name)}</div><div class="st">${it.count} sightings · ${esc(it.stat)}</div></span>
+        </button>`).join('')}
+        ${list.length > MW_SHOW ? `<button type="button" class="mw-more" data-more="${k}">${open ? 'Show fewer' : `Show all ${list.length}`}</button>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  async function loadMigrants() {
+    const seq = ++mwSeq, w = mwWeek;
+    mwData = null; drawMigrants();
+    try {
+      const allW = toWeeks((await apiGet(histURL(AVES))).results.week_of_year);
+      const nowR = (await apiGet(countsURL([mod(w - 1), w, mod(w + 1)]))).results;
+      const sumR = (await apiGet(countsURL(WIN.summer))).results;
+      const winR = (await apiGet(countsURL(WIN.winter))).results;
+      if (seq !== mwSeq) return;
+      mwData = { groups: classifyMigrants(nowR, sumR, winR, allW, w) };
+    } catch (e) {
+      if (seq !== mwSeq) return;
+      mwData = { err: e.message };
+    }
+    drawMigrants();
+  }
+  $('mw').addEventListener('click', e => {
+    const more = e.target.closest('[data-more]');
+    if (more) { const k = more.dataset.more; mwOpen.has(k) ? mwOpen.delete(k) : mwOpen.add(k); drawMigrants(); return; }
+    const b = e.target.closest('[data-mw]');
+    if (!b) return;
+    const [k, id] = b.dataset.mw.split(':');
+    const it = mwData.groups[k].find(x => x.id === +id);
+    if (it) { pick({ id: it.id, name: it.name, sci: it.sci, photo: it.photo, wiki: it.wiki }); $('overlay').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  });
+  // Update the label at once but wait for the clicking to stop before fetching.
+  let mwTimer;
+  const stepWeek = d => {
+    mwWeek = mod(mwWeek + d); mwOpen.clear();
+    mwSeq++; mwData = null; drawMigrants();
+    clearTimeout(mwTimer); mwTimer = setTimeout(loadMigrants, 450);
+  };
+  $('mw-prev').addEventListener('click', () => stepWeek(-1));
+  $('mw-next').addEventListener('click', () => stepWeek(1));
+  $('mw-today').addEventListener('click', () => { mwWeek = currentWeek(); mwOpen.clear(); loadMigrants(); });
+
+  const refresh = () => { render(); loadMigrants(); };
+  let renderTimer;
+  const renderSoon = (ms = 500) => { clearTimeout(renderTimer); renderTimer = setTimeout(refresh, ms); };
+
+  // ---------- species search ----------
+  const input = $('sp-search'), sug = $('sp-suggest');
+  let sugItems = [], sugIdx = -1, acTimer, acSeq = 0;
+  input.addEventListener('input', () => {
+    clearTimeout(acTimer);
+    const q = input.value.trim();
+    if (q.length < 2) { sug.hidden = true; return; }
+    acTimer = setTimeout(async () => {
+      const my = ++acSeq;
+      try {
+        const r = await fetch(`${API}/taxa/autocomplete?${new URLSearchParams({ q, taxon_id: AVES, rank: 'species', per_page: 8, locale: 'en' })}`);
+        const d = await r.json();
+        if (my !== acSeq) return;
+        sugItems = d.results.map(t => ({ id: t.id, name: t.preferred_common_name || t.name, sci: t.name, photo: t.default_photo?.square_url || '', wiki: t.wikipedia_url || '' }));
+        sugIdx = -1;
+        drawSuggest();
+      } catch {
+        sug.innerHTML = '<div class="empty">Search is unavailable right now. Check your connection.</div>'; sug.hidden = false;
+      }
+    }, 250);
+  });
+  function drawSuggest() {
+    if (!sugItems.length) { sug.innerHTML = '<div class="empty">No bird species match that name.</div>'; sug.hidden = false; return; }
+    sug.innerHTML = sugItems.map((t, i) => `<button type="button" data-i="${i}" class="${i === sugIdx ? 'active' : ''}"><img src="${esc(t.photo)}" alt="" loading="lazy" data-taxon="${t.id}"><span><div>${esc(t.name)}</div><div class="sci">${esc(t.sci)}</div></span></button>`).join('');
+    sug.hidden = false;
+  }
+  function pick(t) {
+    sug.hidden = true; input.value = '';
+    if (state.species.some(s => s.id === t.id)) return;
+    if (state.species.length >= MAX_SP) state.species.pop();
+    state.species.push(t);
+    render();
+  }
+  sug.addEventListener('mousedown', e => { const b = e.target.closest('button[data-i]'); if (b) { e.preventDefault(); pick(sugItems[+b.dataset.i]); } });
+  input.addEventListener('keydown', e => {
+    if (sug.hidden) return;
+    if (e.key === 'ArrowDown') { sugIdx = Math.min(sugItems.length - 1, sugIdx + 1); drawSuggest(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { sugIdx = Math.max(0, sugIdx - 1); drawSuggest(); e.preventDefault(); }
+    else if (e.key === 'Enter') { const t = sugItems[Math.max(0, sugIdx)]; if (t) pick(t); e.preventDefault(); }
+    else if (e.key === 'Escape') sug.hidden = true;
+  });
+  input.addEventListener('blur', () => setTimeout(() => (sug.hidden = true), 150));
+  $('chips').addEventListener('click', e => {
+    const b = e.target.closest('[data-rm]');
+    if (!b) return;
+    state.species = state.species.filter(s => s.id !== +b.dataset.rm);
+    render();
+  });
+
+  // ---------- map ----------
+  const map = L.map('map', { scrollWheelZoom: true });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
+  const pinIcon = L.divIcon({ className: '', html: '<div class="pin"></div>', iconSize: [18, 18], iconAnchor: [9, 9] });
+  const marker = L.marker([state.lat, state.lng], { draggable: true, icon: pinIcon, keyboard: true, title: 'Search area center' }).addTo(map);
+  const accent = () => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  const circle = L.circle([state.lat, state.lng], { radius: state.radius * 1000, color: accent(), weight: 2, fillOpacity: 0.12 }).addTo(map);
+  const isDefaultView = state.lat === DEFAULT.lat && state.lng === DEFAULT.lng && state.radius === DEFAULT.radius;
+  const fitStart = () => { map.invalidateSize(); isDefaultView ? map.fitBounds(EAST_BOUNDS) : map.fitBounds(circle.getBounds(), { padding: [20, 20] }); };
+  map.setView([state.lat, state.lng], 6);
+  // Layout (fonts, grid) can settle after this script runs; refit once it has.
+  requestAnimationFrame(fitStart);
+  window.addEventListener('load', fitStart);
+
+  function moveTo(lat, lng, fit) {
+    state.lat = lat; state.lng = lng;
+    marker.setLatLng([lat, lng]); circle.setLatLng([lat, lng]);
+    if (fit) map.fitBounds(circle.getBounds(), { padding: [20, 20] });
+    renderSoon();
+  }
+  map.on('click', e => moveTo(e.latlng.lat, e.latlng.lng));
+  marker.on('drag', e => circle.setLatLng(e.target.getLatLng()));
+  marker.on('dragend', e => { const p = e.target.getLatLng(); moveTo(p.lat, p.lng); });
+
+  const radius = $('radius');
+  radius.value = state.radius; $('radius-out').textContent = state.radius + ' km';
+  radius.addEventListener('input', () => {
+    state.radius = +radius.value;
+    $('radius-out').textContent = state.radius + ' km';
+    circle.setRadius(state.radius * 1000);
+    renderSoon(700);
+  });
+  $('years').value = String(state.years);
+  $('years').addEventListener('change', e => { state.years = +e.target.value; refresh(); });
+
+  const locMsg = $('loc-msg');
+  const say = t => { locMsg.textContent = t; locMsg.hidden = !t; };
+  $('place-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const q = $('place-q').value.trim();
+    if (!q) return;
+    say('Searching…');
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?${new URLSearchParams({ q, format: 'json', limit: 1, countrycodes: 'us,ca,mx' })}`);
+      const d = await r.json();
+      if (!d.length) { say(`No place called "${q}" found in North America.`); return; }
+      say(d[0].display_name);
+      moveTo(+d[0].lat, +d[0].lon, true);
+    } catch { say('Place search is unavailable right now. Click the map instead.'); }
+  });
+  $('locate').addEventListener('click', () => {
+    if (!navigator.geolocation) { say('This browser cannot share your location. Click the map instead.'); return; }
+    say('Finding you…');
+    navigator.geolocation.getCurrentPosition(
+      p => { say(''); moveTo(p.coords.latitude, p.coords.longitude, true); },
+      () => say('Location access was blocked. Click the map instead.'),
+      { timeout: 10000 }
+    );
+  });
+  $('reset').addEventListener('click', () => {
+    state.radius = DEFAULT.radius; radius.value = DEFAULT.radius; $('radius-out').textContent = DEFAULT.radius + ' km';
+    circle.setRadius(DEFAULT.radius * 1000);
+    moveTo(DEFAULT.lat, DEFAULT.lng);
+    map.fitBounds(EAST_BOUNDS);
+    $('place-q').value = '';
+    say('');
+  });
+
+  // ---------- scale toggle ----------
+  function setScale(m) {
+    scaleMode = m; store.set('flyway.scale', m);
+    $('scale-rel').setAttribute('aria-pressed', m === 'rel');
+    $('scale-abs').setAttribute('aria-pressed', m === 'abs');
+    drawResults(lastAllW);
+  }
+  $('scale-rel').addEventListener('click', () => setScale('rel'));
+  $('scale-abs').addEventListener('click', () => setScale('abs'));
+  $('scale-rel').setAttribute('aria-pressed', scaleMode === 'rel');
+  $('scale-abs').setAttribute('aria-pressed', scaleMode === 'abs');
+
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => circle.setStyle({ color: accent() }));
+
+  // ---------- photo hover zoom ----------
+  const zoom = document.createElement('figure');
+  zoom.id = 'zoom'; zoom.style.margin = '0'; zoom.setAttribute('aria-hidden', 'true');
+  zoom.innerHTML = '<img alt=""><figcaption><span class="zn"></span><span class="zs"></span></figcaption>';
+  document.body.appendChild(zoom);
+  const zImg = zoom.querySelector('img'), zCap = zoom.querySelector('.zn'), zSnd = zoom.querySelector('.zs');
+  const THUMBS = '.chip img, .mw-item img, .suggest img';
+  let zoomFor = null;
+  function showZoom(img) {
+    if (!img.getAttribute('src')) return;
+    zoomFor = img;
+    const r = img.getBoundingClientRect(), S = 240, gap = 12;
+    // Prefer opening to the right of the thumbnail; flip left if there is no room. Keep it on screen.
+    let left = r.right + gap;
+    if (left + S > innerWidth - 8) left = r.left - gap - S;
+    left = Math.max(8, Math.min(left, innerWidth - S - 8));
+    const top = Math.max(8, Math.min(r.top + r.height / 2 - S / 2, innerHeight - S - 8));
+    zoom.style.left = left + 'px'; zoom.style.top = top + 'px';
+    // Grow out of the thumbnail's own position.
+    zoom.style.setProperty('--ox', `${r.left + r.width / 2 - left}px`);
+    zoom.style.setProperty('--oy', `${r.top + r.height / 2 - top}px`);
+    zoom.style.setProperty('--s0', (r.width / S).toFixed(3));
+    zImg.src = img.src; // sharp version swaps in once loaded
+    const big = img.src.replace(/\/square\.(jpe?g|png)/i, '/medium.$1');
+    if (big !== img.src) { const pre = new Image(); pre.onload = () => { if (zoomFor === img) zImg.src = big; }; pre.src = big; }
+    const host = img.closest('.chip, .mw-item, .suggest button');
+    zCap.textContent = host?.querySelector('.names div, .nm, span div')?.textContent || '';
+    zSnd.textContent = '';
+    zoom.classList.remove('on'); void zoom.offsetWidth; zoom.classList.add('on');
+    clearTimeout(songTimer);
+    if (soundOn && img.dataset.taxon) songTimer = setTimeout(() => playSong(img), 300); // skip birds the mouse only sweeps past
+  }
+  function hideZoom() { zoomFor = null; zoom.classList.remove('on'); stopSong(); }
+
+  // ---------- songs on hover ----------
+  // Recordings come from research-grade iNaturalist observations, most-faved first. Only openly
+  // licensed recordings are used, and the recordist is credited in the caption while it plays.
+  const audio = new Audio();
+  let soundOn = store.get('flyway.sound') ?? true, songTimer;
+  const songMem = new Map();
+  async function findSong(id) {
+    if (songMem.has(id)) return songMem.get(id);
+    const saved = store.get('flyway.song:' + id);
+    if (saved !== null) { songMem.set(id, saved); return saved; }
+    const url = `${API}/observations?${new URLSearchParams({ taxon_id: id, sounds: 'true', quality_grade: 'research', order_by: 'votes', per_page: 10 })}`;
+    const d = await (await fetch(url)).json();
+    const recs = d.results.flatMap(o => o.sounds || []).filter(x => x.file_url && x.license_code);
+    const best = recs.find(x => /mp4|mpeg|mp3|aac/.test(x.file_content_type || '')) || recs[0];
+    const rec = best ? { url: best.file_url, by: (best.attribution || '').replace(/,? some rights reserved/i, '') } : false;
+    songMem.set(id, rec); store.set('flyway.song:' + id, rec);
+    return rec;
+  }
+  async function playSong(img) {
+    zSnd.textContent = '♪ Finding a recording…';
+    let rec;
+    try { rec = await findSong(+img.dataset.taxon); } catch { if (zoomFor === img) zSnd.textContent = 'Recording unavailable right now'; return; }
+    if (zoomFor !== img) return;
+    if (!rec) { zSnd.textContent = 'No recording on iNaturalist'; return; }
+    audio.src = rec.url; audio.currentTime = 0; audio.volume = 0.8;
+    try {
+      await audio.play();
+      if (zoomFor === img) zSnd.textContent = '♪ ' + rec.by;
+    } catch (e) {
+      if (zoomFor !== img) return;
+      zSnd.textContent = e.name === 'NotAllowedError' ? 'Click anywhere on the page once to allow sound' : 'This recording would not play';
+    }
+  }
+  function stopSong() { clearTimeout(songTimer); audio.pause(); }
+  const soundBtn = $('sound-toggle');
+  const setSound = on => { soundOn = on; store.set('flyway.sound', on); soundBtn.setAttribute('aria-pressed', on); if (!on) stopSong(); };
+  setSound(soundOn);
+  soundBtn.addEventListener('click', () => setSound(!soundOn));
+  document.addEventListener('mouseover', e => { const img = e.target.closest?.(THUMBS); if (img && img !== zoomFor) showZoom(img); });
+  document.addEventListener('mouseout', e => { if (zoomFor && e.target === zoomFor) hideZoom(); });
+  addEventListener('scroll', hideZoom, true);
+
+  refresh();
+})();
+</script>
+</body>
+</html>
