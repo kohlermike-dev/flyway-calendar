@@ -741,9 +741,13 @@ footer a { color: var(--accent); }
   const isDefaultView = state.lat === DEFAULT.lat && state.lng === DEFAULT.lng && state.radius === DEFAULT.radius;
   const fitStart = () => { map.invalidateSize(); isDefaultView ? map.fitBounds(EAST_BOUNDS) : map.fitBounds(circle.getBounds(), { padding: [20, 20] }); };
   map.setView([state.lat, state.lng], 6);
-  // Layout (fonts, grid) can settle after this script runs; refit once it has.
-  requestAnimationFrame(fitStart);
-  window.addEventListener('load', fitStart);
+  // Layout (fonts, stylesheets, grid) can settle after this script runs, and on a slow load the map
+  // box changes size more than once. Refit on every resize until the viewer moves the map themselves.
+  let userMoved = false, fitting = 0;
+  map.on('dragstart zoomstart', () => { if (!fitting) userMoved = true; });
+  const refit = () => { fitting++; try { userMoved ? map.invalidateSize() : fitStart(); } finally { setTimeout(() => fitting--, 400); } };
+  new ResizeObserver(refit).observe(document.getElementById('map'));
+  window.addEventListener('load', refit);
 
   function moveTo(lat, lng, fit) {
     state.lat = lat; state.lng = lng;
